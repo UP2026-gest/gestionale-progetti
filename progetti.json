@@ -288,31 +288,6 @@
         }
       ],
       "tags": []
-    },
-    {
-      "id": "p011",
-      "societa": "UP",
-      "oggetto": "Bresciaround",
-      "obiettivo": "rinnovo convenzione 2020",
-      "responsabile": "Renato",
-      "proposta": "Sì",
-      "strumenti": "",
-      "costi": null,
-      "inizio": "13/03/2026",
-      "scadenza": "20/03/2026",
-      "stato": "Attesa riscontro",
-      "note": "la proposta originale era del marzo 2020, bloccata per pandemia. Il 13/3 ho mandato email proposta, news?",
-      "azioni": [],
-      "storia": [
-        {
-          "data": "13/03/2026",
-          "utente": "Renato",
-          "campo": "creazione",
-          "da": "",
-          "a": "Attesa riscontro"
-        }
-      ],
-      "tags": []
     }
   ],
   "meta": {
