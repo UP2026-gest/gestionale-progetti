@@ -152,7 +152,18 @@
       "scadenza": null,
       "stato": "Attesa riscontro",
       "note": "Eleonora si deve confrontare con responsabile",
-      "azioni": [],
+      "azioni": [
+        {
+          "id": "xbxogjkkvb",
+          "titolo": "inviare proposta convenzione",
+          "scadenza": "06/03/2026",
+          "responsabile": "Renato",
+          "note": "",
+          "completata": false,
+          "creato_da": "Renato",
+          "creato_il": "20/03/2026"
+        }
+      ],
       "storia": [
         {
           "data": "06/03/2026",
@@ -160,6 +171,13 @@
           "campo": "creazione",
           "da": "",
           "a": "Attesa riscontro"
+        },
+        {
+          "data": "20/03/2026",
+          "utente": "Renato",
+          "campo": "azione aggiunta",
+          "da": "",
+          "a": "inviare proposta convenzione"
         }
       ],
       "tags": []
