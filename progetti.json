@@ -159,7 +159,7 @@
           "scadenza": "06/03/2026",
           "responsabile": "Renato",
           "note": "",
-          "completata": false,
+          "completata": true,
           "creato_da": "Renato",
           "creato_il": "20/03/2026"
         }
@@ -178,6 +178,13 @@
           "campo": "azione aggiunta",
           "da": "",
           "a": "inviare proposta convenzione"
+        },
+        {
+          "data": "20/03/2026",
+          "utente": "Renato",
+          "campo": "azione",
+          "da": "inviare proposta convenzione",
+          "a": "completata"
         }
       ],
       "tags": []
