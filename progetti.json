@@ -100,7 +100,7 @@
       "costi": null,
       "inizio": "2026-02-05",
       "scadenza": null,
-      "stato": "Sospesa",
+      "stato": "Attesa riscontro",
       "note": "Al momento non hanno tempo di organizzare ma ritengo sia un no",
       "azioni": [],
       "storia": [
@@ -110,6 +110,13 @@
           "campo": "creazione",
           "da": "",
           "a": "Sospesa"
+        },
+        {
+          "data": "2026-03-20",
+          "utente": "Renato",
+          "campo": "stato",
+          "da": "Sospesa",
+          "a": "Attesa riscontro"
         }
       ],
       "tags": []
