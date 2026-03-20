@@ -645,7 +645,7 @@ async function salvaProgetto() {
 }
 
 async function eliminaProgetto(id) {
-  if (!confirm('Eliminare definitivamente questo progetto? L'operazione non può essere annullata.')) return;
+  if (!confirm("Eliminare definitivamente questo progetto? L'operazione non può essere annullata.")) return;
   DB.progetti = DB.progetti.filter(x => x.id !== id);
   await salva('Progetto eliminato');
   chiudiPanel();
