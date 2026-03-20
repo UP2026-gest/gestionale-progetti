@@ -118,7 +118,7 @@
       "costi": null,
       "inizio": "05/02/2026",
       "scadenza": null,
-      "stato": "Sospesa",
+      "stato": "Chiusa persa",
       "note": "Al momento non hanno tempo di organizzare ma ritengo sia un no",
       "azioni": [],
       "storia": [
@@ -128,6 +128,13 @@
           "campo": "creazione",
           "da": "",
           "a": "Sospesa"
+        },
+        {
+          "data": "20/03/2026",
+          "utente": "Renato",
+          "campo": "stato",
+          "da": "Sospesa",
+          "a": "Chiusa persa"
         }
       ],
       "tags": []
