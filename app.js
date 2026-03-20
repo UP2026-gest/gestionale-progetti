@@ -1,830 +1,719 @@
-// ============================================================
-// CONFIG
-// ============================================================
-const GITHUB_OWNER = 'UP2026-gest';
-const GITHUB_REPO  = 'gestionale-progetti';
-const DATA_FILE    = 'progetti.json';
-const BRANCH       = 'main';
-const API_BASE     = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DATA_FILE}`;
+// ─── CONFIG ───────────────────────────────────────────────────
+const OWNER  = 'UP2026-gest';
+const REPO   = 'gestionale-progetti';
+const FILE   = 'progetti.json';
+const BRANCH = 'main';
+const TOKEN  = localStorage.getItem('gp_token') || '';
+const API    = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${FILE}`;
 
-// ============================================================
-// STATE
-// ============================================================
-let currentUser   = null;
-let dati          = { progetti: [], meta: {} };
-let fileSha       = null;
-let progettoAperto = null;
-let azioneEditId  = null;
-let reminderInterval = null;
-let filtriCorrente = {};
+// ─── STATE ────────────────────────────────────────────────────
+let utente  = null;
+let DB      = { progetti: [], meta: {} };
+let sha     = null;
+let panel_id = null;
+let edit_id  = null;
+let reminder = null;
 
-// ============================================================
-// UTILS
-// ============================================================
-function getToken() { return localStorage.getItem('ghtoken') || ''; }
-function saveToken(t) { localStorage.setItem('ghtoken', t); }
+// ─── DATE UTILS ───────────────────────────────────────────────
+// Tutte le date sono memorizzate come stringa "GG/MM/AAAA"
+// Non usiamo mai input[type=date] per evitare problemi di formato
 
-function oggi() { return new Date().toISOString().split('T')[0]; }
-
-function formatData(iso) {
-  if (!iso) return '—';
-  const [y,m,d] = iso.split('-');
-  return `${d}/${m}/${y}`;
+function oggi() {
+  const d = new Date();
+  return fmt(d);
 }
 
-function diffGiorni(iso) {
-  if (!iso) return null;
-  const oggi = new Date(); oggi.setHours(0,0,0,0);
-  const data = new Date(iso); data.setHours(0,0,0,0);
-  return Math.floor((data - oggi) / 86400000);
+function fmt(d) {
+  if (!d) return '';
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
 }
 
-function scadenzaClass(iso, stato) {
-  if (!iso || isClosed(stato)) return '';
-  const d = diffGiorni(iso);
+function parseData(s) {
+  // Accetta "GG/MM/AAAA" o "AAAA-MM-GG"
+  if (!s) return null;
+  s = s.trim();
+  if (s.includes('/')) {
+    const [g,m,a] = s.split('/');
+    if (!g||!m||!a||a.length!==4) return null;
+    return new Date(parseInt(a), parseInt(m)-1, parseInt(g));
+  }
+  if (s.includes('-')) {
+    const [a,m,g] = s.split('-');
+    return new Date(parseInt(a), parseInt(m)-1, parseInt(g));
+  }
+  return null;
+}
+
+function validaData(s) {
+  if (!s || s.trim() === '') return true; // vuota = ok
+  const d = parseData(s);
+  return d && !isNaN(d.getTime());
+}
+
+function diffGiorni(s) {
+  const d = parseData(s);
+  if (!d) return null;
+  const og = new Date(); og.setHours(0,0,0,0);
+  d.setHours(0,0,0,0);
+  return Math.floor((d - og) / 86400000);
+}
+
+function scadCls(s, stato) {
+  if (!s || isClosed(stato)) return '';
+  const d = diffGiorni(s);
+  if (d === null) return '';
   if (d < 0) return 'scaduta';
-  if (d <= 3) return 'in-scadenza';
+  if (d <= 3) return 'inscadenza';
   return '';
 }
 
+function scadLabel(s, stato) {
+  if (!s) return { t:'—', c:'' };
+  if (isClosed(stato)) return { t:s, c:'sd-ok' };
+  const d = diffGiorni(s);
+  if (d === null) return { t:s, c:'sd-ok' };
+  if (d < 0)  return { t:`Scaduta ${s}`, c:'sd-danger' };
+  if (d === 0) return { t:'Scade oggi', c:'sd-warn' };
+  if (d <= 3)  return { t:`Fra ${d} gg`, c:'sd-warn' };
+  return { t:s, c:'sd-ok' };
+}
+
+
+// Auto-format date: "05042026" or "0504" → "05/04/2026"
+function formatDateInput(el) {
+  let v = el.value.replace(/[^0-9]/g, '');
+  if (v.length >= 8) {
+    v = v.substr(0,8);
+    el.value = v.substr(0,2) + '/' + v.substr(2,2) + '/' + v.substr(4,4);
+  } else if (v.length === 6) {
+    // DDMMYY → DD/MM/20YY
+    el.value = v.substr(0,2) + '/' + v.substr(2,2) + '/20' + v.substr(4,2);
+  }
+}
 function isClosed(stato) {
   return stato === 'Chiusa vinta' || stato === 'Chiusa persa';
 }
 
-function statoClass(stato) {
+// ─── MISC UTILS ───────────────────────────────────────────────
+function uid() { return 'x' + Math.random().toString(36).substr(2,9); }
+
+function toast(msg, dur=2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), dur);
+}
+
+function socTag(s) {
+  if (!s) return `<span class="tag t-mix">—</span>`;
+  if (s === 'UP') return `<span class="tag t-up">UP</span>`;
+  if (s === 'MSF') return `<span class="tag t-msf">MSF</span>`;
+  if (s === 'Studio Piazza') return `<span class="tag t-sp">SP</span>`;
+  return `<span class="tag t-mix">${s}</span>`;
+}
+
+function statoPill(s) {
   const m = {
-    'Primo contatto': 'stato-primo',
-    'Proposta in preparazione': 'stato-proposta',
-    'Attesa riscontro': 'stato-attesa',
-    'Sospesa': 'stato-sospesa',
-    'Chiusa vinta': 'stato-vinta',
-    'Chiusa persa': 'stato-persa'
+    'Primo contatto':'p-primo','Proposta in preparazione':'p-proposta',
+    'Attesa riscontro':'p-attesa','Sospesa':'p-sospesa',
+    'Chiusa vinta':'p-vinta','Chiusa persa':'p-persa'
   };
-  return m[stato] || 'stato-primo';
+  return `<span class="pill ${m[s]||'p-primo'}">${s||'—'}</span>`;
 }
 
-function socClass(soc) {
-  if (!soc) return 'soc-mix';
-  if (soc === 'UP') return 'soc-up';
-  if (soc === 'MSF') return 'soc-msf';
-  if (soc === 'Studio Piazza') return 'soc-sp';
-  return 'soc-mix';
-}
-
-function uid() { return 'a' + Math.random().toString(36).substr(2,9); }
-
-function showToast(msg, dur=2500) {
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.remove('hidden');
-  setTimeout(() => t.classList.add('hidden'), dur);
-}
-
-function avatarColor(nome) {
-  if (nome === 'Renato') return '#2563eb';
-  if (nome === 'Stefania') return '#9333ea';
-  if (nome === 'Matteo') return '#16a34a';
+function avColor(n) {
+  if (n==='Renato') return '#2563eb';
+  if (n==='Stefania') return '#9333ea';
+  if (n==='Matteo') return '#16a34a';
   return '#6b7280';
 }
 
-// ============================================================
-// LOGIN / LOGOUT
-// ============================================================
+// ─── LOGIN ────────────────────────────────────────────────────
 function login(nome) {
-  const tokenEl = document.getElementById('token-input');
-  const raw = tokenEl.value.trim();
-  // accept new token only if it looks like a real token
-  if (raw && raw.startsWith('ghp_')) saveToken(raw);
-  if (!getToken()) {
-    document.getElementById('token-section').style.display = 'block';
-    tokenEl.value = '';
-    tokenEl.placeholder = 'Incolla qui il token ghp_...';
-    tokenEl.focus();
-    showToast('Inserisci il token GitHub per continuare');
+  if (!localStorage.getItem('gp_token')) {
+    document.getElementById('token-box').classList.remove('hidden');
+    window._pendingUser = nome;
+    document.getElementById('token-field').focus();
     return;
   }
-  currentUser = nome;
+  _doLogin(nome);
+}
+
+function salvaToken() {
+  const t = document.getElementById('token-field').value.trim();
+  if (!t.startsWith('ghp_')) { alert('Token non valido — deve iniziare con ghp_'); return; }
+  localStorage.setItem('gp_token', t);
+  document.getElementById('token-box').classList.add('hidden');
+  document.getElementById('token-field').value = '';
+  _doLogin(window._pendingUser);
+}
+
+function _doLogin(nome) {
+  utente = nome;
   document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('main-app').classList.remove('hidden');
-  const av = document.getElementById('avatar-current');
+  document.getElementById('app').classList.remove('hidden');
+  const av = document.getElementById('av-hdr');
   av.textContent = nome[0];
-  av.style.background = avatarColor(nome);
-  document.getElementById('user-label').textContent = nome;
-  caricaDati();
+  av.style.background = avColor(nome);
+  document.getElementById('user-hdr').textContent = nome;
+  carica();
 }
 
 function logout() {
-  currentUser = null;
-  clearInterval(reminderInterval);
-  document.getElementById('main-app').classList.add('hidden');
+  utente = null;
+  clearInterval(reminder);
+  document.getElementById('app').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
-  document.getElementById('token-input').value = '';
 }
 
-// ============================================================
-// GITHUB DATA
-// ============================================================
-async function caricaDati() {
-  showToast('Caricamento dati…', 5000);
+// ─── GITHUB I/O ───────────────────────────────────────────────
+async function carica() {
+  toast('Caricamento…', 10000);
   try {
-    const r = await fetch(API_BASE, {
-      headers: { Authorization: `token ${getToken()}`, Accept: 'application/vnd.github.v3+json' }
+    const r = await fetch(API, {
+      headers: { Authorization: `token ${TOKEN}`, Accept: 'application/vnd.github.v3+json' }
     });
     if (r.status === 404) {
-      // file non esiste ancora, carica dati iniziali embedded
-      await caricaDatiIniziali();
+      // Prima volta: carica dati iniziali
+      await caricaIniziali();
       return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const json = await r.json();
-    fileSha = json.sha;
-    dati = JSON.parse(decodeURIComponent(escape(atob(json.content.replace(/\n/g,'')))));
-    showToast('Dati caricati');
-    renderAll();
+    const j = await r.json();
+    sha = j.sha;
+    const raw = atob(j.content.replace(/\n/g,''));
+    const bytes = new Uint8Array(raw.length);
+    for (let i=0;i<raw.length;i++) bytes[i] = raw.charCodeAt(i);
+    DB = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+    toast('Dati caricati ✓');
+    render();
     avviaReminder();
   } catch(e) {
-    showToast('Errore caricamento: ' + e.message, 4000);
-    await caricaDatiIniziali();
+    toast('Errore: ' + e.message, 5000);
+    await caricaIniziali();
   }
 }
 
-async function caricaDatiIniziali() {
+async function caricaIniziali() {
   try {
     const r = await fetch('progetti_iniziali.json');
-    dati = await r.json();
-    fileSha = null;
-    showToast('Dati locali caricati (non ancora su GitHub)');
-    renderAll();
+    DB = await r.json();
+    sha = null;
+    toast('Dati iniziali caricati');
+    render();
     avviaReminder();
   } catch(e) {
-    dati = { progetti: [], meta: {} };
-    renderAll();
+    DB = { progetti:[], meta:{} };
+    render();
   }
 }
 
-async function salvaDati(messaggio) {
-  dati.meta.ultimo_aggiornamento = oggi();
-  dati.meta.ultimo_utente = currentUser;
-  const jsonStr = JSON.stringify(dati, null, 2);
-  const bytes = new TextEncoder().encode(jsonStr);
-  const content = btoa(String.fromCharCode(...bytes));
-  const body = { message: messaggio || `Update by ${currentUser}`, content, branch: BRANCH };
-  if (fileSha) body.sha = fileSha;
+async function salva(msg) {
+  toast('Salvataggio…', 10000);
+  DB.meta.ultimo_aggiornamento = oggi();
+  DB.meta.ultimo_utente = utente;
+  const json = JSON.stringify(DB, null, 2);
+  const bytes = new TextEncoder().encode(json);
+  let bin = '';
+  for (let i=0; i<bytes.length; i+=8192) {
+    bin += String.fromCharCode(...bytes.subarray(i, i+8192));
+  }
+  const content = btoa(bin);
+  const body = { message: msg || `Update by ${utente}`, content, branch: BRANCH };
+  if (sha) body.sha = sha;
   try {
-    const r = await fetch(API_BASE, {
-      method: 'PUT',
-      headers: {
-        Authorization: `token ${getToken()}`,
-        Accept: 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      },
+    const r = await fetch(API, {
+      method:'PUT',
+      headers:{ Authorization:`token ${TOKEN}`, Accept:'application/vnd.github.v3+json', 'Content-Type':'application/json' },
       body: JSON.stringify(body)
     });
     if (!r.ok) {
       const err = await r.json();
-      if (r.status === 409) {
-        showToast('Conflitto: qualcuno ha salvato prima. Ricarico…', 3000);
-        setTimeout(caricaDati, 1500);
-        return false;
-      }
-      throw new Error(err.message);
+      if (r.status === 409) { toast('Conflitto: ricarico…',3000); setTimeout(carica,1500); return false; }
+      throw new Error(err.message || r.status);
     }
-    const json = await r.json();
-    fileSha = json.content.sha;
-    showToast('Salvato su GitHub ✓');
+    const j = await r.json();
+    sha = j.content.sha;
+    toast('Salvato ✓');
     return true;
   } catch(e) {
-    showToast('Errore salvataggio: ' + e.message, 4000);
+    toast('Errore salvataggio: ' + e.message, 5000);
     return false;
   }
 }
 
-// ============================================================
-// RENDER ALL
-// ============================================================
-function renderAll() {
-  const filtrati = filtra(dati.progetti);
-  renderLista(filtrati);
-  renderKanban(filtrati);
-  renderDashboard(dati.progetti);
-  checkBadge();
-}
-
-// ============================================================
-// FILTRI
-// ============================================================
-function applicaFiltri() {
-  filtriCorrente = {
-    search: document.getElementById('search-input').value.toLowerCase(),
-    societa: document.getElementById('f-societa').value,
-    responsabile: document.getElementById('f-responsabile').value,
-    stato: document.getElementById('f-stato').value,
-    scadenza: document.getElementById('f-scadenza').value
-  };
-  renderAll();
-}
-
-function resetFiltri() {
-  document.getElementById('search-input').value = '';
-  document.getElementById('f-societa').value = '';
-  document.getElementById('f-responsabile').value = '';
-  document.getElementById('f-stato').value = '';
-  document.getElementById('f-scadenza').value = '';
-  filtriCorrente = {};
-  renderAll();
-}
-
-function filtra(progetti) {
-  const f = filtriCorrente;
-  return progetti.filter(p => {
-    if (f.search && !p.oggetto.toLowerCase().includes(f.search) && !(p.note||'').toLowerCase().includes(f.search) && !(p.obiettivo||'').toLowerCase().includes(f.search)) return false;
-    if (f.societa && p.societa !== f.societa) return false;
-    if (f.responsabile && p.responsabile !== f.responsabile) return false;
-    if (f.stato && p.stato !== f.stato) return false;
-    if (f.scadenza) {
+// ─── FILTRI ───────────────────────────────────────────────────
+function filtrati() {
+  const q  = (document.getElementById('q')?.value||'').toLowerCase();
+  const fs = document.getElementById('f-soc')?.value||'';
+  const fr = document.getElementById('f-res')?.value||'';
+  const ft = document.getElementById('f-sta')?.value||'';
+  const fd = document.getElementById('f-sca')?.value||'';
+  return DB.progetti.filter(p => {
+    if (q && !p.oggetto.toLowerCase().includes(q) && !(p.note||'').toLowerCase().includes(q) && !(p.obiettivo||'').toLowerCase().includes(q)) return false;
+    if (fs && p.societa !== fs) return false;
+    if (fr && p.responsabile !== fr) return false;
+    if (ft && p.stato !== ft) return false;
+    if (fd) {
       const d = diffGiorni(p.scadenza);
-      if (f.scadenza === 'scadute' && (d === null || d >= 0)) return false;
-      if (f.scadenza === 'oggi' && d !== 0) return false;
-      if (f.scadenza === '3giorni' && (d === null || d < 0 || d > 3)) return false;
-      if (f.scadenza === 'settimana' && (d === null || d < 0 || d > 7)) return false;
-      if (f.scadenza === 'mese' && (d === null || d < 0 || d > 30)) return false;
+      if (fd==='scadute'  && (d===null||d>=0)) return false;
+      if (fd==='oggi'     && d!==0) return false;
+      if (fd==='3g'       && (d===null||d<0||d>3)) return false;
+      if (fd==='7g'       && (d===null||d<0||d>7)) return false;
+      if (fd==='30g'      && (d===null||d<0||d>30)) return false;
     }
     return true;
   });
 }
 
-// ============================================================
-// LISTA
-// ============================================================
-function renderLista(progetti) {
+function resetFiltri() {
+  document.getElementById('q').value='';
+  document.getElementById('f-soc').value='';
+  document.getElementById('f-res').value='';
+  document.getElementById('f-sta').value='';
+  document.getElementById('f-sca').value='';
+  render();
+}
+
+// ─── RENDER ───────────────────────────────────────────────────
+function render() {
+  const list = filtrati();
+  renderLista(list);
+  renderKanban(list);
+  renderDash(DB.progetti);
+  aggiornaBadge();
+}
+
+function renderLista(list) {
   const body = document.getElementById('lista-body');
-  if (!progetti.length) {
-    body.innerHTML = `<div class="empty-state"><div class="es-icon">📋</div><h3>Nessun progetto trovato</h3><p>Modifica i filtri o aggiungi un nuovo progetto</p></div>`;
+  if (!list.length) {
+    body.innerHTML = `<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg><h3>Nessun progetto trovato</h3><p>Modifica i filtri o aggiungi un nuovo progetto</p></div>`;
     return;
   }
-  body.innerHTML = progetti.map(p => {
-    const cls = scadenzaClass(p.scadenza, p.stato);
-    const chiusa = isClosed(p.stato);
-    const azioniAperte = (p.azioni||[]).filter(a => !a.completata).length;
-    const azioniTot = (p.azioni||[]).length;
-    const scadLabel = scadenzaLabel(p.scadenza, p.stato);
-    return `
-    <div class="lista-row ${cls} ${chiusa?'chiusa':''}" onclick="apriPanel('${p.id}')">
-      <div class="col-societa"><span class="tag-soc ${socClass(p.societa)}">${p.societa||'—'}</span></div>
-      <div class="col-oggetto">
-        <div class="nome">${p.oggetto}</div>
-        <div class="obiettivo">${p.obiettivo||''}</div>
-      </div>
-      <div class="col-resp">${p.responsabile||'—'}</div>
-      <div class="col-stato"><span class="stato-pill ${statoClass(p.stato)}">${p.stato||'—'}</span></div>
-      <div class="col-scad"><span class="${scadLabel.cls}">${scadLabel.testo}</span></div>
-      <div class="col-azioni-n">
-        ${azioniTot > 0 ? `<span class="azioni-badge ${azioniAperte>0?'has-open':''}">${azioniAperte}/${azioniTot}</span>` : '<span class="azioni-badge">—</span>'}
-      </div>
+  body.innerHTML = list.map(p => {
+    const cls = scadCls(p.scadenza, p.stato);
+    const sl  = scadLabel(p.scadenza, p.stato);
+    const azT = (p.azioni||[]).length;
+    const azA = (p.azioni||[]).filter(a=>!a.completata).length;
+    return `<div class="row ${cls} ${isClosed(p.stato)?'chiusa':''}" onclick="apriPanel('${p.id}')">
+      <div>${socTag(p.societa)}</div>
+      <div><div class="row-nome">${p.oggetto}</div><div class="row-obj">${p.obiettivo||''}</div></div>
+      <div style="font-size:13px">${p.responsabile||'—'}</div>
+      <div>${statoPill(p.stato)}</div>
+      <div><span class="${sl.c}">${sl.t}</span></div>
+      <div>${azT>0?`<span class="az-badge ${azA>0?'open':''}">${azA}/${azT}</span>`:`<span class="az-badge">—</span>`}</div>
     </div>`;
   }).join('');
 }
 
-function scadenzaLabel(iso, stato) {
-  if (!iso) return { testo: '—', cls: '' };
-  if (isClosed(stato)) return { testo: formatData(iso), cls: 'scad-ok' };
-  const d = diffGiorni(iso);
-  if (d < 0) return { testo: `Scaduta ${formatData(iso)}`, cls: 'scad-danger' };
-  if (d === 0) return { testo: 'Scade oggi', cls: 'scad-warn' };
-  if (d <= 3) return { testo: `Fra ${d} gg`, cls: 'scad-warn' };
-  return { testo: formatData(iso), cls: 'scad-ok' };
-}
+const STATI = ['Primo contatto','Proposta in preparazione','Attesa riscontro','Sospesa','Chiusa vinta','Chiusa persa'];
 
-// ============================================================
-// KANBAN
-// ============================================================
-const KANBAN_STATI = ['Primo contatto','Proposta in preparazione','Attesa riscontro','Sospesa','Chiusa vinta','Chiusa persa'];
-
-function renderKanban(progetti) {
-  const board = document.getElementById('kanban-board');
-  board.innerHTML = KANBAN_STATI.map(stato => {
-    const lista = progetti.filter(p => p.stato === stato);
-    const cards = lista.map(p => {
-      const cls = scadenzaClass(p.scadenza, p.stato);
-      const scad = p.scadenza ? formatData(p.scadenza) : '—';
-      return `<div class="kanban-card ${cls}" onclick="apriPanel('${p.id}')">
-        <div class="k-oggetto">${p.oggetto}</div>
-        <div class="k-resp">${p.societa||''} · ${p.responsabile||''}</div>
-        <div class="k-scad">${scad}</div>
-      </div>`;
-    }).join('');
-    return `<div class="kanban-col">
-      <div class="kanban-col-header">
-        <span>${stato}</span>
-        <span class="k-count">${lista.length}</span>
-      </div>
-      ${cards || '<div style="font-size:12px;color:var(--c-text3);text-align:center;padding:16px 0">Nessuno</div>'}
+function renderKanban(list) {
+  document.getElementById('kanban').innerHTML = STATI.map(s => {
+    const col = list.filter(p=>p.stato===s);
+    return `<div class="k-col">
+      <div class="k-col-hdr"><span>${s}</span><span class="k-cnt">${col.length}</span></div>
+      ${col.length===0?'<div style="font-size:12px;color:var(--txt3);text-align:center;padding:12px 0">Nessuno</div>':
+        col.map(p=>{
+          const cls=scadCls(p.scadenza,p.stato);
+          return `<div class="k-card ${cls}" onclick="apriPanel('${p.id}')">
+            <div class="k-nome">${p.oggetto}</div>
+            <div class="k-info">${p.societa||''} · ${p.responsabile||''}</div>
+            <div class="k-scad">${p.scadenza||'—'}</div>
+          </div>`;
+        }).join('')}
     </div>`;
   }).join('');
 }
 
-// ============================================================
-// DASHBOARD
-// ============================================================
-function renderDashboard(progetti) {
-  const cont = document.getElementById('dashboard-content');
-  const totale = progetti.length;
-  const attivi = progetti.filter(p => !isClosed(p.stato)).length;
-  const vinte  = progetti.filter(p => p.stato === 'Chiusa vinta').length;
-  const scadute = progetti.filter(p => !isClosed(p.stato) && diffGiorni(p.scadenza) !== null && diffGiorni(p.scadenza) < 0).length;
-  const winRate = totale > 0 ? Math.round(vinte / totale * 100) : 0;
+const COLORS = ['#2563eb','#9333ea','#16a34a','#ea580c','#ca8a04','#dc2626'];
 
-  const perStato = {};
-  KANBAN_STATI.forEach(s => perStato[s] = progetti.filter(p => p.stato === s).length);
+function renderDash(list) {
+  const tot   = list.length;
+  const att   = list.filter(p=>!isClosed(p.stato)).length;
+  const vinte = list.filter(p=>p.stato==='Chiusa vinta').length;
+  const scad  = list.filter(p=>!isClosed(p.stato)&&diffGiorni(p.scadenza)!==null&&diffGiorni(p.scadenza)<0).length;
+  const wr    = tot>0?Math.round(vinte/tot*100):0;
+  const perSt = STATI.map(s=>({s,n:list.filter(p=>p.stato===s).length}));
+  const maxSt = Math.max(...perSt.map(x=>x.n),1);
+  const resp  = ['Renato','Stefania','Matteo','Tutti'].map(r=>({r,n:list.filter(p=>p.responsabile===r).length})).filter(x=>x.n>0);
 
-  const perResp = {};
-  ['Renato','Stefania','Matteo','Tutti'].forEach(r => {
-    perResp[r] = progetti.filter(p => p.responsabile === r || (r==='Tutti' && p.responsabile==='Tutti')).length;
-  });
-
-  const colori = ['#2563eb','#9333ea','#16a34a','#ea580c','#ca8a04','#dc2626'];
-  const maxSt = Math.max(...Object.values(perStato), 1);
-
-  cont.innerHTML = `
-  <div class="dashboard-grid">
-    <div class="stat-card"><div class="stat-label">Progetti totali</div><div class="stat-value">${totale}</div></div>
-    <div class="stat-card"><div class="stat-label">Attivi</div><div class="stat-value">${attivi}</div></div>
-    <div class="stat-card"><div class="stat-label">Chiusi vinti</div><div class="stat-value" style="color:var(--c-success)">${vinte}</div></div>
-    <div class="stat-card"><div class="stat-label">Scaduti</div><div class="stat-value" style="color:var(--c-danger)">${scadute}</div></div>
-    <div class="stat-card"><div class="stat-label">Win rate</div><div class="stat-value">${winRate}%</div></div>
+  document.getElementById('dashboard').innerHTML = `
+  <div class="dash-stats">
+    <div class="stat"><div class="stat-lbl">Totale</div><div class="stat-val">${tot}</div></div>
+    <div class="stat"><div class="stat-lbl">Attivi</div><div class="stat-val">${att}</div></div>
+    <div class="stat"><div class="stat-lbl">Chiusi vinti</div><div class="stat-val" style="color:var(--ok)">${vinte}</div></div>
+    <div class="stat"><div class="stat-lbl">Scaduti</div><div class="stat-val" style="color:var(--danger)">${scad}</div></div>
+    <div class="stat"><div class="stat-lbl">Win rate</div><div class="stat-val">${wr}%</div></div>
   </div>
-  <div class="dash-section">
-    <h3>Distribuzione per stato</h3>
-    ${KANBAN_STATI.map((s,i) => `
-    <div class="bar-row">
-      <div class="bar-label"><span class="stato-pill ${statoClass(s)}">${s}</span></div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(perStato[s]/maxSt*100)}%;background:${colori[i]}"></div></div>
-      <div class="bar-num">${perStato[s]}</div>
-    </div>`).join('')}
+  <div class="dash-box"><h3>Per stato</h3>
+    ${perSt.map((x,i)=>`<div class="bar-row"><div class="bar-lbl">${statoPill(x.s)}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(x.n/maxSt*100)}%;background:${COLORS[i]}"></div></div><div class="bar-n">${x.n}</div></div>`).join('')}
   </div>
-  <div class="dash-section">
-    <h3>Progetti per responsabile</h3>
-    ${Object.entries(perResp).filter(([,v])=>v>0).map(([nome,n])=>`
-    <div class="bar-row">
-      <div class="bar-label">${nome}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(n/totale*100)}%;background:${avatarColor(nome)}"></div></div>
-      <div class="bar-num">${n}</div>
-    </div>`).join('')}
+  <div class="dash-box"><h3>Per responsabile</h3>
+    ${resp.map(x=>`<div class="bar-row"><div class="bar-lbl" style="font-size:13px">${x.r}</div><div class="bar-track"><div class="bar-fill" style="width:${tot>0?Math.round(x.n/tot*100):0}%;background:${avColor(x.r)}"></div></div><div class="bar-n">${x.n}</div></div>`).join('')}
   </div>`;
 }
 
-// ============================================================
-// PANEL LATERALE
-// ============================================================
+// ─── VIEWS ────────────────────────────────────────────────────
+function setView(v, btn) {
+  document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-'+v).classList.remove('hidden');
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelector('.filtri').style.display = v==='dashboard'?'none':'';
+}
+
+// ─── PANEL ────────────────────────────────────────────────────
 function apriPanel(id) {
-  progettoAperto = dati.progetti.find(p => p.id === id);
-  if (!progettoAperto) return;
+  panel_id = id;
+  document.getElementById('panel-overlay').classList.remove('hidden');
+  document.getElementById('panel').classList.remove('hidden');
   renderPanel();
-  document.getElementById('side-panel').classList.remove('hidden');
 }
 
 function chiudiPanel() {
-  document.getElementById('side-panel').classList.add('hidden');
-  progettoAperto = null;
-  azioneEditId = null;
+  panel_id = null;
+  document.getElementById('panel-overlay').classList.add('hidden');
+  document.getElementById('panel').classList.add('hidden');
 }
 
 function renderPanel() {
-  const p = progettoAperto;
-  document.getElementById('sp-societa').textContent = p.societa || '';
-  document.getElementById('sp-titolo').textContent = p.oggetto;
-
-  const body = document.getElementById('side-body');
-  const azioni = p.azioni || [];
-  const storia = p.storia || [];
-
-  body.innerHTML = `
-  <!-- DETTAGLI -->
-  <div class="sp-section">
-    <div class="sp-section-title">Dettagli
-      <button class="btn-small" onclick="apriEditProgetto('${p.id}')">Modifica</button>
-    </div>
-    <div class="sp-grid">
-      <div class="sp-field"><label>Responsabile</label><div class="val">${p.responsabile||'—'}</div></div>
-      <div class="sp-field"><label>Stato</label><div class="val"><span class="stato-pill ${statoClass(p.stato)}">${p.stato||'—'}</span></div></div>
-      <div class="sp-field"><label>Proposta</label><div class="val">${p.proposta||'—'}</div></div>
-      <div class="sp-field"><label>Scadenza</label><div class="val">${formatData(p.scadenza)}</div></div>
-      <div class="sp-field"><label>Inizio</label><div class="val">${formatData(p.inizio)}</div></div>
-      <div class="sp-field"><label>Strumenti</label><div class="val">${p.strumenti||'—'}</div></div>
-      ${p.costi ? `<div class="sp-field"><label>Costi</label><div class="val">€ ${p.costi.toLocaleString()}</div></div>` : ''}
-      <div class="sp-field" style="grid-column:1/-1"><label>Obiettivo</label><div class="val">${p.obiettivo||'—'}</div></div>
+  const p = DB.progetti.find(x=>x.id===panel_id);
+  if (!p) return;
+  const azioni = p.azioni||[];
+  const storia = p.storia||[];
+  document.getElementById('panel-inner').innerHTML = `
+  <div class="p-hdr">
+    <div><div class="p-soc">${p.societa||''}</div><div class="p-titolo">${p.oggetto}</div></div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="sm-btn del" onclick="eliminaProgetto('${p.id}')" title="Elimina progetto">🗑</button>
+      <button class="x-btn" onclick="chiudiPanel()">✕</button>
     </div>
   </div>
 
-  <!-- NOTE -->
-  <div class="sp-section">
-    <div class="sp-section-title">Note progetto</div>
-    <div id="sp-note-view">
-      <div style="font-size:13px;color:var(--c-text2);margin-bottom:8px">${p.note || '<em>Nessuna nota</em>'}</div>
-      <button class="btn-small-sec" onclick="toggleNoteEdit()">Aggiorna nota</button>
+  <div class="p-section">
+    <div class="p-section-title">Dettagli <button class="sm-btn" onclick="apriForm('${p.id}')">Modifica</button></div>
+    <div class="p-grid">
+      <div class="p-field"><label>Responsabile</label><div class="val">${p.responsabile||'—'}</div></div>
+      <div class="p-field"><label>Stato</label><div class="val">${statoPill(p.stato)}</div></div>
+      <div class="p-field"><label>Proposta</label><div class="val">${p.proposta||'—'}</div></div>
+      <div class="p-field"><label>Scadenza</label><div class="val"><span class="${scadLabel(p.scadenza,p.stato).c}">${scadLabel(p.scadenza,p.stato).t}</span></div></div>
+      <div class="p-field"><label>Inizio</label><div class="val">${p.inizio||'—'}</div></div>
+      <div class="p-field"><label>Strumenti</label><div class="val">${p.strumenti||'—'}</div></div>
+      ${p.costi?`<div class="p-field"><label>Costi</label><div class="val">€ ${p.costi.toLocaleString()}</div></div>`:''}
+      <div class="p-field full"><label>Obiettivo</label><div class="val">${p.obiettivo||'—'}</div></div>
     </div>
-    <div id="sp-note-edit" style="display:none">
-      <textarea id="sp-note-input" rows="3" style="width:100%;padding:8px;border:1.5px solid var(--c-border);border-radius:6px;font-family:var(--font);font-size:13px;resize:vertical;margin-bottom:8px">${p.note||''}</textarea>
+  </div>
+
+  <div class="p-section">
+    <div class="p-section-title">Note</div>
+    <div id="note-view">
+      <div style="font-size:13px;color:var(--txt2);margin-bottom:8px">${p.note||'<em>Nessuna nota</em>'}</div>
+      <button class="sm-btn" onclick="toggleNota(true)">Aggiorna nota</button>
+    </div>
+    <div id="note-edit" style="display:none">
+      <textarea id="nota-input" rows="3" style="width:100%;padding:8px;border:1.5px solid var(--brd);border-radius:6px;font-family:var(--font);font-size:13px;resize:vertical;margin-bottom:7px">${p.note||''}</textarea>
       <div class="form-btns">
-        <button class="btn-small-sec" onclick="toggleNoteEdit()">Annulla</button>
-        <button class="btn-small" onclick="salvaNota('${p.id}')">Salva nota</button>
+        <button class="sm-btn-s" onclick="toggleNota(false)">Annulla</button>
+        <button class="sm-btn-p" onclick="salvaNota('${p.id}')">Salva</button>
       </div>
     </div>
   </div>
 
-  <!-- AZIONI -->
-  <div class="sp-section">
-    <div class="sp-section-title">Azioni
-      <button class="btn-small" onclick="toggleNuovaAzione()">+ Aggiungi</button>
-    </div>
-    <div id="nuova-azione-form" class="nuova-azione-form" style="display:none;margin-bottom:12px">
-      <input type="text" id="az-titolo" placeholder="Descrizione azione *">
-      <div class="nuova-az-row">
-        <input type="date" id="az-scad" style="flex:1">
-        <input type="text" id="az-resp" placeholder="Responsabile" style="flex:1">
+  <div class="p-section">
+    <div class="p-section-title">Azioni <button class="sm-btn" onclick="toggleFormAzione(true)">+ Aggiungi</button></div>
+    <div id="form-azione" style="display:none" class="inline-form">
+      <input type="text" id="az-tit" placeholder="Descrizione azione *">
+      <div class="irow">
+        <input type="text" id="az-sca" placeholder="Scadenza GG/MM/AAAA" maxlength="10" onblur="formatDateInput(this)">
+        <input type="text" id="az-res" placeholder="Responsabile">
       </div>
-      <textarea id="az-note" rows="2" placeholder="Note (opzionale)"></textarea>
+      <textarea id="az-not" rows="2" placeholder="Note (opzionale)"></textarea>
       <div class="form-btns">
-        <button class="btn-small-sec" onclick="toggleNuovaAzione()">Annulla</button>
-        <button class="btn-small" onclick="aggiungiAzione('${p.id}')">Aggiungi azione</button>
+        <button class="sm-btn-s" onclick="toggleFormAzione(false)">Annulla</button>
+        <button class="sm-btn-p" onclick="aggiungiAzione('${p.id}')">Aggiungi</button>
       </div>
     </div>
-    <div class="azioni-list" id="azioni-list">
-      ${azioni.length === 0 ? '<div style="font-size:13px;color:var(--c-text3);padding:8px 0">Nessuna azione registrata</div>' :
-        azioni.map(a => renderAzione(a, p.id)).join('')}
+    <div id="azioni-list">
+      ${azioni.length===0?'<div style="font-size:13px;color:var(--txt3);padding:8px 0">Nessuna azione</div>':azioni.map(a=>renderAzione(a,p.id)).join('')}
     </div>
   </div>
 
-  <!-- STORIA -->
-  <div class="sp-section">
-    <div class="sp-section-title">Storico modifiche</div>
-    <div class="storia-list">
-      ${storia.length === 0 ? '<div style="font-size:13px;color:var(--c-text3)">Nessuna modifica registrata</div>' :
-        [...storia].reverse().map(s => `
-        <div class="storia-item">
-          <div class="storia-dot"></div>
-          <div>
-            <div class="storia-text"><strong>${s.utente||'?'}</strong> — ${s.campo}: ${s.da ? `<span style="text-decoration:line-through;color:var(--c-text3)">${s.da}</span> → ` : ''}${s.a}</div>
-            <div class="storia-data">${s.data||''}</div>
-          </div>
-        </div>`).join('')}
-    </div>
+  <div class="p-section">
+    <div class="p-section-title">Storico modifiche</div>
+    ${storia.length===0?'<div style="font-size:13px;color:var(--txt3)">Nessuna modifica registrata</div>':
+      [...storia].reverse().map(s=>`
+      <div class="storia-item"><div class="s-dot"></div><div>
+        <div class="s-txt"><strong>${s.utente||'?'}</strong> — ${s.campo}${s.da?`: <s style="color:var(--txt3)">${s.da}</s> → ${s.a}`:`: ${s.a}`}</div>
+        <div class="s-data">${s.data||''}</div>
+      </div></div>`).join('')}
   </div>`;
 }
 
 function renderAzione(a, pid) {
   const d = diffGiorni(a.scadenza);
-  const scadCls = !a.completata && a.scadenza && d !== null && d < 0 ? 'scaduta-az' : '';
-  return `
-  <div class="azione-item ${a.completata?'completata':''} ${scadCls}" id="az-${a.id}">
+  const cls = !a.completata && a.scadenza && d!==null && d<0 ? 'scaduta-az' : '';
+  return `<div class="az-item ${a.completata?'completata':''} ${cls}" id="az-${a.id}">
     <div class="az-top">
-      <div class="az-check ${a.completata?'checked':''}" onclick="toggleAzione('${pid}','${a.id}')">${a.completata?'✓':''}</div>
-      <div class="az-titolo ${a.completata?'completata-testo':''}">${a.titolo}</div>
-      ${a.scadenza ? `<div class="az-scad">${formatData(a.scadenza)}</div>` : ''}
+      <div class="az-chk ${a.completata?'done':''}" onclick="toggleAz('${pid}','${a.id}')">${a.completata?'✓':''}</div>
+      <div class="az-tit ${a.completata?'done-txt':''}">${a.titolo}</div>
+      ${a.scadenza?`<div class="az-scad-lbl">${a.scadenza}</div>`:''}
     </div>
-    ${a.note ? `<div class="az-note">${a.note}</div>` : ''}
-    <div class="az-meta">Aggiunto da ${a.creato_da||'?'} · ${a.creato_il||''}</div>
-    <div class="az-actions">
-      <button class="az-btn" onclick="editAzione('${pid}','${a.id}')">Modifica</button>
-      <button class="az-btn danger" onclick="eliminaAzione('${pid}','${a.id}')">Elimina</button>
+    ${a.note?`<div class="az-note">${a.note}</div>`:''}
+    <div class="az-meta">Da ${a.creato_da||'?'} · ${a.creato_il||''}</div>
+    <div class="az-btns">
+      <button class="sm-btn" onclick="editAz('${pid}','${a.id}')">Modifica</button>
+      <button class="sm-btn del" onclick="delAz('${pid}','${a.id}')">Elimina</button>
     </div>
   </div>`;
 }
 
-function toggleNoteEdit() {
-  const v = document.getElementById('sp-note-view');
-  const e = document.getElementById('sp-note-edit');
-  const showing = e.style.display !== 'none';
-  v.style.display = showing ? '' : 'none';
-  e.style.display = showing ? 'none' : '';
+function toggleNota(show) {
+  document.getElementById('note-view').style.display = show?'none':'';
+  document.getElementById('note-edit').style.display = show?'':'none';
+  if (show) document.getElementById('nota-input').focus();
 }
 
+function toggleFormAzione(show) {
+  document.getElementById('form-azione').style.display = show?'':'none';
+  if (show) document.getElementById('az-tit').focus();
+}
+
+// ─── NOTE ─────────────────────────────────────────────────────
 async function salvaNota(pid) {
-  const p = dati.progetti.find(x => x.id === pid);
+  const p = DB.progetti.find(x=>x.id===pid);
   if (!p) return;
-  const nuova = document.getElementById('sp-note-input').value;
-  logStoria(p, 'nota', p.note, nuova);
-  p.note = nuova;
-  await salvaDati(`Nota aggiornata: ${p.oggetto}`);
-  progettoAperto = p;
-  renderPanel();
-  renderAll();
+  const v = document.getElementById('nota-input').value;
+  log(p,'nota',p.note,v);
+  p.note = v;
+  await salva(`Nota: ${p.oggetto}`);
+  renderPanel(); render();
 }
 
-function toggleNuovaAzione() {
-  const f = document.getElementById('nuova-azione-form');
-  f.style.display = f.style.display === 'none' ? '' : 'none';
-  if (f.style.display !== 'none') document.getElementById('az-titolo').focus();
-}
-
+// ─── AZIONI ───────────────────────────────────────────────────
 async function aggiungiAzione(pid) {
-  const titolo = document.getElementById('az-titolo').value.trim();
-  if (!titolo) { showToast('Inserisci una descrizione'); return; }
-  const p = dati.progetti.find(x => x.id === pid);
+  const tit = document.getElementById('az-tit').value.trim();
+  if (!tit) { toast('Inserisci la descrizione'); return; }
+  const scaRaw = document.getElementById('az-sca').value.trim();
+  if (scaRaw && !validaData(scaRaw)) { toast('Data non valida (usa GG/MM/AAAA)'); return; }
+  const p = DB.progetti.find(x=>x.id===pid);
   if (!p) return;
-  if (!p.azioni) p.azioni = [];
-  const nuova = {
-    id: uid(),
-    titolo,
-    scadenza: document.getElementById('az-scad').value || null,
-    responsabile: document.getElementById('az-resp').value || currentUser,
-    note: document.getElementById('az-note').value || '',
-    completata: false,
-    creato_da: currentUser,
-    creato_il: oggi()
-  };
-  p.azioni.push(nuova);
-  logStoria(p, 'azione aggiunta', '', nuova.titolo);
-  await salvaDati(`Azione aggiunta: ${p.oggetto}`);
-  progettoAperto = p;
-  renderPanel();
-  renderAll();
+  if (!p.azioni) p.azioni=[];
+  p.azioni.push({
+    id:uid(), titolo:tit,
+    scadenza: scaRaw || null,
+    responsabile: document.getElementById('az-res').value||utente,
+    note: document.getElementById('az-not').value||'',
+    completata:false, creato_da:utente, creato_il:oggi()
+  });
+  log(p,'azione aggiunta','',tit);
+  await salva(`Azione aggiunta: ${p.oggetto}`);
+  renderPanel(); render();
 }
 
-async function toggleAzione(pid, aid) {
-  const p = dati.progetti.find(x => x.id === pid);
-  if (!p) return;
-  const a = p.azioni.find(x => x.id === aid);
-  if (!a) return;
+async function toggleAz(pid, aid) {
+  const p = DB.progetti.find(x=>x.id===pid);
+  const a = p.azioni.find(x=>x.id===aid);
   a.completata = !a.completata;
-  a.completata_da = a.completata ? currentUser : null;
-  a.completata_il = a.completata ? oggi() : null;
-  logStoria(p, 'azione', a.titolo, a.completata ? 'completata' : 'riaperta');
-  await salvaDati(`Azione ${a.completata?'completata':'riaperta'}: ${p.oggetto}`);
-  progettoAperto = p;
-  renderPanel();
-  renderAll();
+  log(p,'azione',a.titolo,a.completata?'completata':'riaperta');
+  await salva(`Azione ${a.completata?'completata':'riaperta'}: ${p.oggetto}`);
+  renderPanel(); render();
 }
 
-function editAzione(pid, aid) {
-  const p = dati.progetti.find(x => x.id === pid);
-  const a = p.azioni.find(x => x.id === aid);
-  if (!a) return;
-  const el = document.getElementById(`az-${aid}`);
-  el.innerHTML = `
-    <input type="text" id="edit-az-titolo" value="${a.titolo}" style="width:100%;padding:7px 9px;border:1.5px solid var(--c-border);border-radius:6px;font-family:var(--font);font-size:13px;margin-bottom:7px">
-    <div class="nuova-az-row">
-      <input type="date" id="edit-az-scad" value="${a.scadenza||''}" style="flex:1;padding:7px 9px;border:1.5px solid var(--c-border);border-radius:6px;font-family:var(--font);font-size:13px">
-      <input type="text" id="edit-az-resp" value="${a.responsabile||''}" placeholder="Responsabile" style="flex:1;padding:7px 9px;border:1.5px solid var(--c-border);border-radius:6px;font-family:var(--font);font-size:13px">
+function editAz(pid, aid) {
+  const p = DB.progetti.find(x=>x.id===pid);
+  const a = p.azioni.find(x=>x.id===aid);
+  document.getElementById(`az-${aid}`).innerHTML = `
+    <input type="text" id="eaz-tit" value="${a.titolo}" style="width:100%;padding:7px 9px;border:1.5px solid var(--brd);border-radius:6px;font-family:var(--font);font-size:13px;margin-bottom:7px;outline:none">
+    <div class="irow" style="margin-bottom:7px">
+      <input type="text" id="eaz-sca" value="${a.scadenza||''}" placeholder="GG/MM/AAAA" maxlength="10" onblur="formatDateInput(this)" style="flex:1;padding:7px 9px;border:1.5px solid var(--brd);border-radius:6px;font-family:var(--font);font-size:13px;outline:none">
+      <input type="text" id="eaz-res" value="${a.responsabile||''}" placeholder="Responsabile" style="flex:1;padding:7px 9px;border:1.5px solid var(--brd);border-radius:6px;font-family:var(--font);font-size:13px;outline:none">
     </div>
-    <textarea id="edit-az-note" rows="2" style="width:100%;padding:7px 9px;border:1.5px solid var(--c-border);border-radius:6px;font-family:var(--font);font-size:13px;resize:vertical;margin-top:7px">${a.note||''}</textarea>
-    <div class="form-btns" style="margin-top:8px">
-      <button class="btn-small-sec" onclick="renderPanel()">Annulla</button>
-      <button class="btn-small" onclick="salvaEditAzione('${pid}','${aid}')">Salva</button>
+    <textarea id="eaz-not" rows="2" style="width:100%;padding:7px 9px;border:1.5px solid var(--brd);border-radius:6px;font-family:var(--font);font-size:13px;resize:vertical;margin-bottom:7px;outline:none">${a.note||''}</textarea>
+    <div class="form-btns">
+      <button class="sm-btn-s" onclick="renderPanel()">Annulla</button>
+      <button class="sm-btn-p" onclick="salvaAz('${pid}','${aid}')">Salva</button>
     </div>`;
 }
 
-async function salvaEditAzione(pid, aid) {
-  const p = dati.progetti.find(x => x.id === pid);
-  const a = p.azioni.find(x => x.id === aid);
-  a.titolo       = document.getElementById('edit-az-titolo').value.trim() || a.titolo;
-  a.scadenza     = document.getElementById('edit-az-scad').value || null;
-  a.responsabile = document.getElementById('edit-az-resp').value || a.responsabile;
-  a.note         = document.getElementById('edit-az-note').value;
-  a.modificato_da = currentUser;
-  a.modificato_il = oggi();
-  await salvaDati(`Azione modificata: ${p.oggetto}`);
-  progettoAperto = p;
-  renderPanel();
-  renderAll();
+async function salvaAz(pid, aid) {
+  const scaRaw = document.getElementById('eaz-sca').value.trim();
+  if (scaRaw && !validaData(scaRaw)) { toast('Data non valida (usa GG/MM/AAAA)'); return; }
+  const p = DB.progetti.find(x=>x.id===pid);
+  const a = p.azioni.find(x=>x.id===aid);
+  a.titolo = document.getElementById('eaz-tit').value.trim()||a.titolo;
+  a.scadenza = scaRaw||null;
+  a.responsabile = document.getElementById('eaz-res').value||a.responsabile;
+  a.note = document.getElementById('eaz-not').value;
+  await salva(`Azione modificata: ${p.oggetto}`);
+  renderPanel(); render();
 }
 
-async function eliminaAzione(pid, aid) {
+async function delAz(pid, aid) {
   if (!confirm('Eliminare questa azione?')) return;
-  const p = dati.progetti.find(x => x.id === pid);
-  const a = p.azioni.find(x => x.id === aid);
-  logStoria(p, 'azione eliminata', a.titolo, '');
-  p.azioni = p.azioni.filter(x => x.id !== aid);
-  await salvaDati(`Azione eliminata: ${p.oggetto}`);
-  progettoAperto = p;
-  renderPanel();
-  renderAll();
+  const p = DB.progetti.find(x=>x.id===pid);
+  const a = p.azioni.find(x=>x.id===aid);
+  log(p,'azione eliminata',a.titolo,'');
+  p.azioni = p.azioni.filter(x=>x.id!==aid);
+  await salva(`Azione eliminata: ${p.oggetto}`);
+  renderPanel(); render();
 }
 
-// ============================================================
-// NUOVO / EDIT PROGETTO
-// ============================================================
-let editingId = null;
-
-function apriNuovoProgetto() {
-  editingId = null;
-  document.getElementById('modal-title').textContent = 'Nuovo progetto';
-  document.getElementById('f-soc').value = 'UP';
-  document.getElementById('f-resp').value = currentUser;
-  document.getElementById('f-oggetto').value = '';
-  document.getElementById('f-obiettivo').value = '';
-  document.getElementById('f-stato-form').value = 'Primo contatto';
-  document.getElementById('f-proposta').value = 'No';
-  document.getElementById('f-inizio').value = oggi();
-  document.getElementById('f-scadenza').value = '';
-  document.getElementById('f-strumenti').value = '';
-  document.getElementById('f-costi').value = '';
-  document.getElementById('f-note').value = '';
-  document.getElementById('modal-progetto').classList.remove('hidden');
+// ─── FORM PROGETTO ────────────────────────────────────────────
+function apriForm(id) {
+  edit_id = id;
+  document.getElementById('modal-title').textContent = id ? 'Modifica progetto' : 'Nuovo progetto';
+  const p = id ? DB.progetti.find(x=>x.id===id) : null;
+  document.getElementById('m-soc').value = p?.societa||'UP';
+  document.getElementById('m-res').value = p?.responsabile||utente;
+  document.getElementById('m-ogg').value = p?.oggetto||'';
+  document.getElementById('m-obj').value = p?.obiettivo||'';
+  document.getElementById('m-sta').value = p?.stato||'Primo contatto';
+  document.getElementById('m-pro').value = p?.proposta||'No';
+  document.getElementById('m-ini').value = p?.inizio||'';
+  document.getElementById('m-sca').value = p?.scadenza||'';
+  document.getElementById('m-str').value = p?.strumenti||'';
+  document.getElementById('m-cos').value = p?.costi||'';
+  document.getElementById('m-not').value = p?.note||'';
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('m-ogg').focus();
 }
 
-function apriEditProgetto(pid) {
-  const p = dati.progetti.find(x => x.id === pid);
-  if (!p) return;
-  editingId = pid;
-  document.getElementById('modal-title').textContent = 'Modifica progetto';
-  document.getElementById('f-soc').value = p.societa || 'UP';
-  document.getElementById('f-resp').value = p.responsabile || currentUser;
-  document.getElementById('f-oggetto').value = p.oggetto || '';
-  document.getElementById('f-obiettivo').value = p.obiettivo || '';
-  document.getElementById('f-stato-form').value = p.stato || 'Primo contatto';
-  document.getElementById('f-proposta').value = p.proposta || 'No';
-  document.getElementById('f-inizio').value = p.inizio || '';
-  document.getElementById('f-scadenza').value = p.scadenza || '';
-  document.getElementById('f-strumenti').value = p.strumenti || '';
-  document.getElementById('f-costi').value = p.costi || '';
-  document.getElementById('f-note').value = p.note || '';
-  document.getElementById('modal-progetto').classList.remove('hidden');
-}
-
-function chiudiModal() {
-  document.getElementById('modal-progetto').classList.add('hidden');
-  editingId = null;
+function chiudiForm() {
+  edit_id = null;
+  document.getElementById('modal-overlay').classList.add('hidden');
+  document.getElementById('modal').classList.add('hidden');
 }
 
 async function salvaProgetto() {
-  const oggetto = document.getElementById('f-oggetto').value.trim();
-  if (!oggetto) { showToast('Inserisci il nome del progetto'); return; }
+  const ogg = document.getElementById('m-ogg').value.trim();
+  if (!ogg) { document.getElementById('m-ogg').classList.add('err'); toast('Inserisci il nome del progetto'); return; }
+  document.getElementById('m-ogg').classList.remove('err');
 
-  if (editingId) {
-    const p = dati.progetti.find(x => x.id === editingId);
-    const vecchioStato = p.stato;
-    p.societa     = document.getElementById('f-soc').value;
-    p.responsabile = document.getElementById('f-resp').value;
-    p.oggetto     = oggetto;
-    p.obiettivo   = document.getElementById('f-obiettivo').value;
-    const nuovoStato = document.getElementById('f-stato-form').value;
-    if (nuovoStato !== vecchioStato) logStoria(p, 'stato', vecchioStato, nuovoStato);
-    p.stato       = nuovoStato;
-    p.proposta    = document.getElementById('f-proposta').value;
-    p.inizio      = document.getElementById('f-inizio').value || null;
-    p.scadenza    = document.getElementById('f-scadenza').value || null;
-    p.strumenti   = document.getElementById('f-strumenti').value;
-    p.costi       = parseFloat(document.getElementById('f-costi').value) || null;
-    p.note        = document.getElementById('f-note').value;
-    await salvaDati(`Progetto modificato: ${oggetto}`);
-    progettoAperto = p;
+  const iniRaw = document.getElementById('m-ini').value.trim();
+  const scaRaw = document.getElementById('m-sca').value.trim();
+
+  if (iniRaw && !validaData(iniRaw)) { toast('Data inizio non valida (usa GG/MM/AAAA)'); return; }
+  if (scaRaw && !validaData(scaRaw)) { toast('Scadenza non valida (usa GG/MM/AAAA)'); return; }
+
+  if (edit_id) {
+    const p = DB.progetti.find(x=>x.id===edit_id);
+    const oldStato = p.stato;
+    p.societa      = document.getElementById('m-soc').value;
+    p.responsabile = document.getElementById('m-res').value;
+    p.oggetto      = ogg;
+    p.obiettivo    = document.getElementById('m-obj').value;
+    const newStato = document.getElementById('m-sta').value;
+    if (newStato !== oldStato) log(p,'stato',oldStato,newStato);
+    p.stato        = newStato;
+    p.proposta     = document.getElementById('m-pro').value;
+    p.inizio       = iniRaw||null;
+    p.scadenza     = scaRaw||null;
+    p.strumenti    = document.getElementById('m-str').value;
+    p.costi        = parseFloat(document.getElementById('m-cos').value)||null;
+    p.note         = document.getElementById('m-not').value;
+    await salva(`Modificato: ${ogg}`);
+    chiudiForm();
+    // Aggiorna panel se aperto
+    if (panel_id === edit_id) renderPanel();
   } else {
-    const nuovo = {
-      id: uid(),
-      societa:      document.getElementById('f-soc').value,
-      oggetto,
-      obiettivo:    document.getElementById('f-obiettivo').value,
-      responsabile: document.getElementById('f-resp').value,
-      proposta:     document.getElementById('f-proposta').value,
-      strumenti:    document.getElementById('f-strumenti').value,
-      costi:        parseFloat(document.getElementById('f-costi').value) || null,
-      inizio:       document.getElementById('f-inizio').value || null,
-      scadenza:     document.getElementById('f-scadenza').value || null,
-      stato:        document.getElementById('f-stato-form').value,
-      note:         document.getElementById('f-note').value,
-      azioni:       [],
-      storia:       [{ data: oggi(), utente: currentUser, campo: 'creazione', da: '', a: document.getElementById('f-stato-form').value }],
-      tags:         []
+    const p = {
+      id:uid(),
+      societa:      document.getElementById('m-soc').value,
+      oggetto:      ogg,
+      obiettivo:    document.getElementById('m-obj').value,
+      responsabile: document.getElementById('m-res').value,
+      proposta:     document.getElementById('m-pro').value,
+      strumenti:    document.getElementById('m-str').value,
+      costi:        parseFloat(document.getElementById('m-cos').value)||null,
+      inizio:       iniRaw||null,
+      scadenza:     scaRaw||null,
+      stato:        document.getElementById('m-sta').value,
+      note:         document.getElementById('m-not').value,
+      azioni:[], storia:[{data:oggi(),utente,campo:'creazione',da:'',a:document.getElementById('m-sta').value}], tags:[]
     };
-    dati.progetti.push(nuovo);
-    await salvaDati(`Nuovo progetto: ${oggetto}`);
+    DB.progetti.push(p);
+    await salva(`Nuovo: ${ogg}`);
+    chiudiForm();
   }
-
-  chiudiModal();
-  renderAll();
-  if (editingId && document.getElementById('side-panel').classList.contains('hidden') === false) {
-    renderPanel();
-  }
+  render();
 }
 
-// ============================================================
-// STORIA
-// ============================================================
-function logStoria(p, campo, da, a) {
-  if (!p.storia) p.storia = [];
-  p.storia.push({ data: oggi(), utente: currentUser, campo, da, a });
+async function eliminaProgetto(id) {
+  if (!confirm('Eliminare definitivamente questo progetto? L'operazione non può essere annullata.')) return;
+  DB.progetti = DB.progetti.filter(x => x.id !== id);
+  await salva('Progetto eliminato');
+  chiudiPanel();
+  render();
 }
 
-// ============================================================
-// SCADENZE E REMINDER
-// ============================================================
-function getScadenzeAllarme() {
-  const allarmi = [];
-  dati.progetti.forEach(p => {
+// ─── STORIA ───────────────────────────────────────────────────
+function log(p, campo, da, a) {
+  if (!p.storia) p.storia=[];
+  p.storia.push({ data:oggi(), utente, campo, da, a });
+}
+
+// ─── ALLARMI ──────────────────────────────────────────────────
+function getAllarmi() {
+  const out = [];
+  DB.progetti.forEach(p => {
     if (isClosed(p.stato)) return;
     const d = diffGiorni(p.scadenza);
-    if (d !== null && d <= 3) {
-      allarmi.push({
-        tipo: d < 0 ? 'scaduta' : d === 0 ? 'oggi' : 'presto',
-        titolo: p.oggetto,
-        dettaglio: `Scadenza progetto: ${formatData(p.scadenza)} · ${p.responsabile}`,
-        tipoLabel: 'progetto',
-        id: p.id
-      });
-    }
+    if (d!==null && d<=3) out.push({ tipo:d<0?'sc':d===0?'og':'pr', tit:p.oggetto, det:`Scadenza: ${p.scadenza} · ${p.responsabile}`, label:'progetto', id:p.id });
     (p.azioni||[]).forEach(a => {
       if (a.completata) return;
       const da = diffGiorni(a.scadenza);
-      if (da !== null && da <= 3) {
-        allarmi.push({
-          tipo: da < 0 ? 'scaduta' : da === 0 ? 'oggi' : 'presto',
-          titolo: a.titolo,
-          dettaglio: `Azione su: ${p.oggetto} · ${formatData(a.scadenza)}`,
-          tipoLabel: 'azione',
-          id: p.id
-        });
-      }
+      if (da!==null && da<=3) out.push({ tipo:da<0?'sc':da===0?'og':'pr', tit:a.titolo, det:`Azione su: ${p.oggetto} · ${a.scadenza}`, label:'azione', id:p.id });
     });
   });
-  return allarmi;
+  return out;
 }
 
-function checkBadge() {
-  const n = getScadenzeAllarme().length;
-  const dot = document.getElementById('badge-dot');
-  if (n > 0) dot.classList.remove('hidden');
-  else dot.classList.add('hidden');
+function aggiornaBadge() {
+  const n = getAllarmi().length;
+  const b = document.getElementById('allarmi-badge');
+  n>0 ? b.classList.remove('hidden') : b.classList.add('hidden');
 }
 
-function openAlerts() { mostraPopupScadenze(); }
-
-function mostraPopupScadenze() {
-  const allarmi = getScadenzeAllarme();
-  const popup = document.getElementById('popup-scadenze');
-  if (!allarmi.length) { showToast('Nessuna scadenza imminente ✓'); return; }
-
-  document.getElementById('popup-sub').textContent = `${allarmi.length} elemento${allarmi.length>1?'i':''} da controllare`;
-  document.getElementById('popup-lista').innerHTML = allarmi.map(a => `
-    <div class="popup-item ${a.tipo==='scaduta'?'scaduta-p':a.tipo==='oggi'?'oggi-p':'presto-p'}" onclick="apriPanel('${a.id}');chiudiPopup()">
-      <div class="pi-titolo">${a.titolo}<span class="pi-tipo ${a.tipoLabel==='azione'?'pi-az':'pi-prog'}">${a.tipoLabel}</span></div>
-      <div class="pi-det">${a.dettaglio}</div>
+function mostraAllarmi() {
+  const al = getAllarmi();
+  const pop = document.getElementById('popup');
+  if (!al.length) { toast('Nessuna scadenza imminente ✓'); return; }
+  document.getElementById('popup-sub').textContent = `${al.length} elemento${al.length>1?'i':''} da controllare`;
+  document.getElementById('popup-list').innerHTML = al.map(a=>`
+    <div class="popup-item ${a.tipo}" onclick="apriPanel('${a.id}');chiudiPopup()">
+      <div class="pi-tit">${a.tit}<span class="pi-tipo ${a.label==='azione'?'ti-az':'ti-pr'}">${a.label}</span></div>
+      <div class="pi-det">${a.det}</div>
     </div>`).join('');
-
-  popup.classList.remove('hidden');
+  pop.classList.remove('hidden');
 }
 
-function chiudiPopup() {
-  document.getElementById('popup-scadenze').classList.add('hidden');
-}
+function chiudiPopup() { document.getElementById('popup').classList.add('hidden'); }
 
 function avviaReminder() {
-  mostraPopupScadenze();
-  if (reminderInterval) clearInterval(reminderInterval);
-  reminderInterval = setInterval(() => {
-    mostraPopupScadenze();
-  }, 15 * 60 * 1000); // ogni 15 minuti
+  mostraAllarmi();
+  clearInterval(reminder);
+  reminder = setInterval(mostraAllarmi, 15*60*1000);
 }
 
-// ============================================================
-// SWITCH VIEW
-// ============================================================
-function switchView(nome) {
-  document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
-  document.getElementById(`view-${nome}`).classList.remove('hidden');
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector(`[data-view="${nome}"]`).classList.add('active');
-  document.getElementById('filtri-bar').style.display = nome === 'dashboard' ? 'none' : '';
+// ─── EXPORT ───────────────────────────────────────────────────
+function esporta() {
+  const list = filtrati();
+  const rows = [['Società','Progetto','Obiettivo','Responsabile','Proposta','Stato','Inizio','Scadenza','Costi','Note','Azioni tot','Azioni aperte']];
+  list.forEach(p => rows.push([
+    p.societa||'',p.oggetto||'',p.obiettivo||'',p.responsabile||'',p.proposta||'',p.stato||'',
+    p.inizio||'',p.scadenza||'',p.costi||'',(p.note||'').replace(/\n/g,' '),
+    (p.azioni||[]).length,(p.azioni||[]).filter(a=>!a.completata).length
+  ]));
+  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
+  a.download = `progetti_${oggi().replace(/\//g,'-')}.csv`;
+  a.click();
+  toast('Export completato');
 }
-
-// ============================================================
-// EXPORT EXCEL (CSV compatibile)
-// ============================================================
-function esportaExcel() {
-  const filtrati = filtra(dati.progetti);
-  const righe = [
-    ['Società','Oggetto','Obiettivo','Responsabile','Proposta','Stato','Inizio','Scadenza','Strumenti','Costi (€)','Note','N. Azioni','Azioni aperte']
-  ];
-  filtrati.forEach(p => {
-    righe.push([
-      p.societa||'', p.oggetto||'', p.obiettivo||'', p.responsabile||'',
-      p.proposta||'', p.stato||'',
-      formatData(p.inizio), formatData(p.scadenza),
-      p.strumenti||'', p.costi||'', (p.note||'').replace(/\n/g,' '),
-      (p.azioni||[]).length,
-      (p.azioni||[]).filter(a=>!a.completata).length
-    ]);
-  });
-  const csv = righe.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url;
-  a.download = `progetti_${oggi()}.csv`; a.click();
-  URL.revokeObjectURL(url);
-  showToast('Export completato');
-}
-
-// ============================================================
-// INIT
-// ============================================================
-document.addEventListener('DOMContentLoaded', () => {
-  const savedToken = getToken();
-  const tokenSection = document.getElementById('token-section');
-  const tokenInput = document.getElementById('token-input');
-  tokenSection.style.display = 'block';
-  if (savedToken) {
-    tokenInput.placeholder = 'Token salvato — incolla uno nuovo per cambiarlo';
-    tokenInput.value = '';
-  } else {
-    tokenInput.placeholder = 'Incolla qui il token ghp_...';
-  }
-});
