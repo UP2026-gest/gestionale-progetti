@@ -141,7 +141,18 @@
       "scadenza": null,
       "stato": "Attesa riscontro",
       "note": "proposta per convenzione con loro associati",
-      "azioni": [],
+      "azioni": [
+        {
+          "id": "a7il74vhxo",
+          "titolo": "il 06/03/2026 ha mandato proposta convenzione, news?",
+          "scadenza": "2026-03-27",
+          "responsabile": "Renato",
+          "note": "il 20/03 ha detto che ci aggiornerà dopo prossimo consiglio",
+          "completata": false,
+          "creato_da": "Renato",
+          "creato_il": "2026-03-20"
+        }
+      ],
       "storia": [
         {
           "data": "2026-03-06",
@@ -149,6 +160,13 @@
           "campo": "creazione",
           "da": "",
           "a": "Attesa riscontro"
+        },
+        {
+          "data": "2026-03-20",
+          "utente": "Renato",
+          "campo": "azione aggiunta",
+          "da": "",
+          "a": "il 06/03/2026 ha mandato proposta convenzione, news?"
         }
       ],
       "tags": []
