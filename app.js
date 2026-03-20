@@ -91,10 +91,13 @@ function avatarColor(nome) {
 // ============================================================
 function login(nome) {
   const tokenEl = document.getElementById('token-input');
-  const token = tokenEl.value.trim();
-  if (token) saveToken(token);
+  const raw = tokenEl.value.trim();
+  // accept new token only if it looks like a real token
+  if (raw && raw.startsWith('ghp_')) saveToken(raw);
   if (!getToken()) {
     document.getElementById('token-section').style.display = 'block';
+    tokenEl.value = '';
+    tokenEl.placeholder = 'Incolla qui il token ghp_...';
     tokenEl.focus();
     showToast('Inserisci il token GitHub per continuare');
     return;
@@ -134,7 +137,7 @@ async function caricaDati() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const json = await r.json();
     fileSha = json.sha;
-    dati = JSON.parse(atob(json.content.replace(/\n/g,'')));
+    dati = JSON.parse(decodeURIComponent(escape(atob(json.content.replace(/\n/g,'')))));
     showToast('Dati caricati');
     renderAll();
     avviaReminder();
@@ -161,7 +164,9 @@ async function caricaDatiIniziali() {
 async function salvaDati(messaggio) {
   dati.meta.ultimo_aggiornamento = oggi();
   dati.meta.ultimo_utente = currentUser;
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(dati, null, 2))));
+  const jsonStr = JSON.stringify(dati, null, 2);
+  const bytes = new TextEncoder().encode(jsonStr);
+  const content = btoa(String.fromCharCode(...bytes));
   const body = { message: messaggio || `Update by ${currentUser}`, content, branch: BRANCH };
   if (fileSha) body.sha = fileSha;
   try {
@@ -813,12 +818,13 @@ function esportaExcel() {
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
   const savedToken = getToken();
+  const tokenSection = document.getElementById('token-section');
+  const tokenInput = document.getElementById('token-input');
+  tokenSection.style.display = 'block';
   if (savedToken) {
-    document.getElementById('token-input').value = '••••••••••••••••';
-    document.getElementById('token-section').style.display = 'none';
-  }
-  // mostra sezione token se non c'è token
-  if (!savedToken) {
-    document.getElementById('token-section').style.display = 'block';
+    tokenInput.placeholder = 'Token salvato — incolla uno nuovo per cambiarlo';
+    tokenInput.value = '';
+  } else {
+    tokenInput.placeholder = 'Incolla qui il token ghp_...';
   }
 });
