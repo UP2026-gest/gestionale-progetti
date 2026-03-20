@@ -12,7 +12,7 @@
       "inizio": "2026-02-06",
       "scadenza": null,
       "stato": "Chiusa vinta",
-      "note": "appuntamento con Micol il 17/03 per conoscenza e valutazione più approfondita",
+      "note": "ad aprile 2026 verrà pubblicata convenzione su loro sito\nil prossimo inverno faremo video live su GdT",
       "azioni": [],
       "storia": [
         {
@@ -28,6 +28,13 @@
           "campo": "stato",
           "da": "Attesa riscontro",
           "a": "Chiusa vinta"
+        },
+        {
+          "data": "2026-03-20",
+          "utente": "Renato",
+          "campo": "nota",
+          "da": "appuntamento con Micol il 17/03 per conoscenza e valutazione più approfondita",
+          "a": "ad aprile 2026 verrà pubblicata convenzione su loro sito\nil prossimo inverno faremo video live su GdT"
         }
       ],
       "tags": []
