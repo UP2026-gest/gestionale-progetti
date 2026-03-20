@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestionale Progetti — UP · MSF · Studio Piazza</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <span class="logo-up">UP</span><span class="logo-dot">·</span><span class="logo-msf">MSF</span><span class="logo-dot">·</span><span class="logo-sp">SP</span>
+      </div>
+      <h1 class="login-title">Gestionale Progetti</h1>
+      <p class="login-sub">Seleziona il tuo profilo per continuare</p>
+      <div class="user-grid">
+        <button class="user-btn" onclick="login('Renato')">
+          <div class="avatar av-renato">R</div>
+          <span>Renato</span>
+        </button>
+        <button class="user-btn" onclick="login('Stefania')">
+          <div class="avatar av-stefania">S</div>
+          <span>Stefania</span>
+        </button>
+        <button class="user-btn" onclick="login('Matteo')">
+          <div class="avatar av-matteo">M</div>
+          <span>Matteo</span>
+        </button>
+      </div>
+      <div class="token-section" id="token-section">
+        <p class="token-label">Token GitHub <span class="token-hint">(salvato localmente)</span></p>
+        <input type="password" id="token-input" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+        <p class="token-note">Il token non viene mai inviato a server esterni. Serve solo per leggere/scrivere i dati su GitHub.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="main-app" class="hidden">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="app-logo">
+          <span class="logo-up">UP</span><span class="logo-dot">·</span><span class="logo-msf">MSF</span><span class="logo-dot">·</span><span class="logo-sp">SP</span>
+        </div>
+        <nav class="top-nav">
+          <button class="nav-btn active" data-view="lista" onclick="switchView('lista')">Lista</button>
+          <button class="nav-btn" data-view="kanban" onclick="switchView('kanban')">Kanban</button>
+          <button class="nav-btn" data-view="dashboard" onclick="switchView('dashboard')">Dashboard</button>
+        </nav>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" title="Notifiche" onclick="openAlerts()" id="alerts-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="badge-dot hidden" id="badge-dot"></span>
+        </button>
+        <button class="icon-btn" title="Esporta" onclick="esportaExcel()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="nuovo-btn" onclick="apriNuovoProgetto()">+ Nuovo progetto</button>
+        <div class="user-chip" onclick="logout()">
+          <div class="avatar-sm" id="avatar-current"></div>
+          <span id="user-label"></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- FILTRI -->
+    <div class="filtri-bar" id="filtri-bar">
+      <input type="text" class="search-input" placeholder="Cerca progetto..." id="search-input" oninput="applicaFiltri()">
+      <select class="filtro-sel" id="f-societa" onchange="applicaFiltri()">
+        <option value="">Tutte le società</option>
+        <option>UP</option><option>MSF</option><option>Studio Piazza</option>
+        <option>UP + MSF</option><option>UP + Studio Piazza</option>
+        <option>MSF + Studio Piazza</option><option>UP + MSF + Studio Piazza</option>
+      </select>
+      <select class="filtro-sel" id="f-responsabile" onchange="applicaFiltri()">
+        <option value="">Tutti i responsabili</option>
+        <option>Renato</option><option>Stefania</option><option>Matteo</option><option>Tutti</option>
+      </select>
+      <select class="filtro-sel" id="f-stato" onchange="applicaFiltri()">
+        <option value="">Tutti gli stati</option>
+        <option>Primo contatto</option><option>Proposta in preparazione</option>
+        <option>Attesa riscontro</option><option>Sospesa</option>
+        <option>Chiusa vinta</option><option>Chiusa persa</option>
+      </select>
+      <select class="filtro-sel" id="f-scadenza" onchange="applicaFiltri()">
+        <option value="">Qualsiasi scadenza</option>
+        <option value="scadute">Scadute</option>
+        <option value="oggi">Scade oggi</option>
+        <option value="3giorni">Entro 3 giorni</option>
+        <option value="settimana">Entro 7 giorni</option>
+        <option value="mese">Entro 30 giorni</option>
+      </select>
+      <button class="reset-btn" onclick="resetFiltri()">✕ Reset</button>
+    </div>
+
+    <!-- VIEWS -->
+    <div class="view-container">
+
+      <!-- LISTA VIEW -->
+      <div id="view-lista" class="view active">
+        <div class="lista-header">
+          <span class="col-societa">Società</span>
+          <span class="col-oggetto">Progetto</span>
+          <span class="col-resp">Responsabile</span>
+          <span class="col-stato">Stato</span>
+          <span class="col-scad">Scadenza</span>
+          <span class="col-azioni-n">Azioni</span>
+        </div>
+        <div id="lista-body"></div>
+      </div>
+
+      <!-- KANBAN VIEW -->
+      <div id="view-kanban" class="view hidden">
+        <div class="kanban-board" id="kanban-board"></div>
+      </div>
+
+      <!-- DASHBOARD VIEW -->
+      <div id="view-dashboard" class="view hidden">
+        <div id="dashboard-content"></div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- PANNELLO LATERALE PROGETTO -->
+  <div id="side-panel" class="side-panel hidden">
+    <div class="side-overlay" onclick="chiudiPanel()"></div>
+    <div class="side-content">
+      <div class="side-header">
+        <div>
+          <div class="side-societa" id="sp-societa"></div>
+          <h2 class="side-titolo" id="sp-titolo"></h2>
+        </div>
+        <button class="close-btn" onclick="chiudiPanel()">✕</button>
+      </div>
+      <div class="side-body" id="side-body"></div>
+    </div>
+  </div>
+
+  <!-- MODAL NUOVO/EDIT PROGETTO -->
+  <div id="modal-progetto" class="modal hidden">
+    <div class="modal-overlay" onclick="chiudiModal()"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Nuovo progetto</h3>
+        <button onclick="chiudiModal()" class="close-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Società</label>
+            <select id="f-soc">
+              <option>UP</option><option>MSF</option><option>Studio Piazza</option>
+              <option>UP + MSF</option><option>UP + Studio Piazza</option>
+              <option>MSF + Studio Piazza</option><option>UP + MSF + Studio Piazza</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Responsabile</label>
+            <select id="f-resp">
+              <option>Renato</option><option>Stefania</option><option>Matteo</option>
+              <option>Renato + Stefania</option><option>Renato + Matteo</option>
+              <option>Stefania + Matteo</option><option>Tutti</option>
+            </select>
+          </div>
+          <div class="form-group full">
+            <label>Oggetto / Iniziativa</label>
+            <input type="text" id="f-oggetto" placeholder="Nome del progetto">
+          </div>
+          <div class="form-group full">
+            <label>Obiettivo</label>
+            <input type="text" id="f-obiettivo" placeholder="Obiettivo dell'iniziativa">
+          </div>
+          <div class="form-group">
+            <label>Stato</label>
+            <select id="f-stato-form">
+              <option>Primo contatto</option><option>Proposta in preparazione</option>
+              <option>Attesa riscontro</option><option>Sospesa</option>
+              <option>Chiusa vinta</option><option>Chiusa persa</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Proposta fatta</label>
+            <select id="f-proposta">
+              <option>No</option><option>Sì</option><option>In preparazione</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Data inizio</label>
+            <input type="date" id="f-inizio">
+          </div>
+          <div class="form-group">
+            <label>Scadenza</label>
+            <input type="date" id="f-scadenza">
+          </div>
+          <div class="form-group">
+            <label>Strumenti</label>
+            <input type="text" id="f-strumenti" placeholder="es. CRM, LinkedIn…">
+          </div>
+          <div class="form-group">
+            <label>Costi (€)</label>
+            <input type="number" id="f-costi" placeholder="0">
+          </div>
+          <div class="form-group full">
+            <label>Note</label>
+            <textarea id="f-note" rows="3" placeholder="Aggiornamenti, dettagli…"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="chiudiModal()">Annulla</button>
+        <button class="btn-primary" onclick="salvaProgetto()">Salva</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- POPUP SCADENZE -->
+  <div id="popup-scadenze" class="popup-scadenze hidden">
+    <div class="popup-header">
+      <div class="popup-icon">⚠</div>
+      <div>
+        <h3 class="popup-title">Attenzione scadenze</h3>
+        <p class="popup-sub" id="popup-sub"></p>
+      </div>
+      <button class="close-btn" onclick="chiudiPopup()">✕</button>
+    </div>
+    <div id="popup-lista"></div>
+    <div class="popup-footer">
+      <button class="btn-secondary" onclick="chiudiPopup()">Chiudi</button>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
