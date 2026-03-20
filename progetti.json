@@ -13,7 +13,18 @@
       "scadenza": null,
       "stato": "Chiusa vinta",
       "note": "ad aprile 2026 pubblicheranno convenzione, inverno 2026/27 diretta live video con me per GdT",
-      "azioni": [],
+      "azioni": [
+        {
+          "id": "xxb0sgjfep",
+          "titolo": "inviare testo per convenzione traduzioni",
+          "scadenza": "18/03/2026",
+          "responsabile": "Renato",
+          "note": "",
+          "completata": false,
+          "creato_da": "Renato",
+          "creato_il": "20/03/2026"
+        }
+      ],
       "storia": [
         {
           "data": "06/02/2026",
@@ -28,6 +39,13 @@
           "campo": "stato",
           "da": "Attesa riscontro",
           "a": "Chiusa vinta"
+        },
+        {
+          "data": "20/03/2026",
+          "utente": "Renato",
+          "campo": "azione aggiunta",
+          "da": "",
+          "a": "inviare testo per convenzione traduzioni"
         }
       ],
       "tags": []
