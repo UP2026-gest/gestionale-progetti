@@ -190,31 +190,6 @@
       "tags": []
     },
     {
-      "id": "p006",
-      "societa": "UP",
-      "oggetto": "Mattia Merlini / Proschool",
-      "obiettivo": "Acquisizione di nuovi corsi, valutare se utile come sviluppo commerciale",
-      "responsabile": "Renato",
-      "proposta": "No",
-      "strumenti": "",
-      "costi": null,
-      "inizio": "27/02/2026",
-      "scadenza": "13/03/2026",
-      "stato": "Attesa riscontro",
-      "note": "organizzare nuovo incontro per approfondire",
-      "azioni": [],
-      "storia": [
-        {
-          "data": "27/02/2026",
-          "utente": "Renato",
-          "campo": "creazione",
-          "da": "",
-          "a": "Attesa riscontro"
-        }
-      ],
-      "tags": []
-    },
-    {
       "id": "p007",
       "societa": "UP",
       "oggetto": "Dieffe",
